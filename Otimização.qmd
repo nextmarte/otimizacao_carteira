@@ -1,0 +1,138 @@
+---
+title: "Otimizacao de carteiras"
+author: "Marcus Ramalho"
+format: html
+editor: visual
+---
+
+## Primeiro vamos carregar os pacotes necessários
+
+```{r}
+#| message: false
+#| warning: false
+#| error: false
+#| echo: false
+
+# Lista de pacotes necessários
+pacotes <- c("tidyverse", "PortfolioAnalytics", "quantmod", "ROI", "ROI.plugin.quadprog", "ROI.plugin.glpk", "timetk", "PerformanceAnalytics")
+
+# Verifica se os pacotes estão instalados, instala os que faltam
+for (pacote in pacotes) {
+  if (!require(pacote, character.only = TRUE)) {
+    install.packages(pacote)
+    library(pacote, character.only = TRUE)
+  }
+}
+
+```
+
+## Ativos selecionados 
+
+```{r}
+
+# Ativos selecionados
+
+tickers <- c("VALE3.SA","PETR4.SA","AZUL4.SA","MGLU3.SA", "CMIG4.SA")
+
+prices <- 
+  getSymbols(tickers, 
+             src = 'yahoo', 
+             from = "2019-05-30",
+             to = "2024-05-30",
+             auto.assign = TRUE, #obs auto asign carrega os resultados para o ambiente
+             warnings = FALSE,) %>% 
+  map(~Ad(get(.))) %>% 
+  reduce(merge) %>%
+  `colnames<-`(tickers)
+
+head(prices)
+class(prices)
+```
+
+
+## Agora vamos converter os preços diários em mensais
+
+```{r}
+#| echo: true
+#| message: false
+
+
+prices_monthly <- to.monthly(prices, indexAt = "lastof", OHLC = FALSE)
+head(prices_monthly)
+```
+
+## Vamos calcular os retornos mensais
+
+```{r}
+asset_returns_xts <-
+ PerformanceAnalytics::Return.calculate(prices_monthly, 
+                   method = "discrete") %>% 
+  na.omit()
+head(asset_returns_xts)
+
+summary(asset_returns_xts)
+```
+
+## Otimização da carteira
+
+```{r}
+
+#| message: false
+
+# Criando o objeto de otimização
+
+portf <- portfolio.spec(assets = colnames(asset_returns_xts))
+
+# Adicionando restrições, como por exemplo, a soma dos pesos dos ativos deve ser igual a 1
+
+portf <- add.constraint(portf, type = "full_investment")
+
+# Adicionando restrição de peso mínimo e máximo para cada ativo
+# Neste caso, o peso mínimo é 0 e o peso máximo é 1
+
+portf <- add.constraint(portf, type = "long_only")
+
+
+# Adiciona a função objetivo, que é minimizar o desvio padrão da carteira
+
+portf <- add.objective(portf, type = "risk", name = "StdDev")
+
+# Resolve o problema de otimização
+
+opt_portf <- optimize.portfolio(asset_returns_xts, portf, optimize_method = "ROI")
+
+```
+
+## Resultados da otimização
+
+```{r}
+
+opt_portf
+
+```
+
+## Extraindo os pesos dos ativos
+
+```{r}
+
+
+# extraindo os pesos para um data frame
+weights <- extractWeights(opt_portf)
+
+# Adicionando os nomes dos ativos sem colocá-los no índice
+weights <- data.frame(tickers = colnames(asset_returns_xts), weights, row.names = NULL)
+
+weights
+
+
+
+
+```
+
+## plotando com o portfolioAnalytics
+
+```{r}
+
+chart.Weights(opt_portf)
+
+```
